@@ -52,50 +52,54 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
-
+    
         btnSync  = findViewById(R.id.btnSync)
         tvStatus = findViewById(R.id.tvStatus)
         tvHR     = findViewById(R.id.tvHR)
         tvSpO2   = findViewById(R.id.tvSpO2)
         tvSteps  = findViewById(R.id.tvSteps)
-
-        // Debug: show all status codes on screen
-        val status1 = HealthConnectClient.getSdkStatus(this, "com.google.android.apps.health.data")
-        val status2 = HealthConnectClient.getSdkStatus(this, "com.google.android.apps.healthdata")
-        val status3 = HealthConnectClient.getSdkStatus(this)
-        setStatus("s1=$status1 s2=$status2 s3=$status3")
-
-        // Find which package works (2 = SDK_AVAILABLE)
-        val providerPackage = when {
-            status1 != 0 -> "com.google.android.apps.health.data"
-            status2 != 0 -> "com.google.android.apps.healthdata"
-            status3 != 0 -> null
-            else -> {
-                btnSync.isEnabled = false
-                return
-            }
-        }
-        
-        healthConnectClient = if (providerPackage != null)
-            HealthConnectClient.getOrCreate(this, providerPackage)
-        else
-            HealthConnectClient.getOrCreate(this)
-        
-        setStatus("HC found. Checking permissions...")
-
-        btnSync.setOnClickListener { syncVitals() }
-
-        CoroutineScope(Dispatchers.Main).launch {
-            try {
-                val granted = healthConnectClient.permissionController.getGrantedPermissions()
-                if (!granted.containsAll(PERMISSIONS)) {
-                    requestPermissions.launch(PERMISSIONS)
-                } else {
-                    setStatus("Ready. Tap to sync.")
+    
+        try {
+            val status1 = HealthConnectClient.getSdkStatus(this, "com.google.android.apps.health.data")
+            val status2 = HealthConnectClient.getSdkStatus(this, "com.google.android.apps.healthdata")
+            val status3 = HealthConnectClient.getSdkStatus(this)
+    
+            setStatus("s1=$status1 s2=$status2 s3=$status3")
+    
+            val providerPackage = when {
+                status1 != 0 -> "com.google.android.apps.health.data"
+                status2 != 0 -> "com.google.android.apps.healthdata"
+                status3 != 0 -> null
+                else -> {
+                    setStatus("❌ HC not available")
+                    btnSync.isEnabled = false
+                    return
                 }
-            } catch (e: Exception) {
-                setStatus("❌ Permission check failed: ${e.message}")
             }
+    
+            healthConnectClient = if (providerPackage != null)
+                HealthConnectClient.getOrCreate(this, providerPackage)
+            else
+                HealthConnectClient.getOrCreate(this)
+    
+            btnSync.setOnClickListener { syncVitals() }
+    
+            CoroutineScope(Dispatchers.Main).launch {
+                try {
+                    val granted = healthConnectClient.permissionController.getGrantedPermissions()
+                    if (!granted.containsAll(PERMISSIONS)) {
+                        requestPermissions.launch(PERMISSIONS)
+                    } else {
+                        setStatus("Ready. Tap to sync.")
+                    }
+                } catch (e: Exception) {
+                    setStatus("❌ Permission check: ${e.message}")
+                }
+            }
+    
+        } catch (e: Exception) {
+            setStatus("❌ Crash: ${e.message}")
+            btnSync.isEnabled = false
         }
     }
 
