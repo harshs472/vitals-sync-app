@@ -26,6 +26,12 @@ jobs:
       - name: Find APK
         run: find . -name "*.apk" -type f
 
+      - name: List build outputs
+        run: find . -name "*.apk" -o -name "*.aab" | head -20
+
+      - name: List app build dir
+        run: ls -la app/build/outputs/ || echo "outputs dir not found"
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
