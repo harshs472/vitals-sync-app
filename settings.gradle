@@ -1,0 +1,2 @@
+rootProject.name = "VitalsSync"
+include ':app'
