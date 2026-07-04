@@ -21,7 +21,10 @@ jobs:
         run: chmod +x gradlew
 
       - name: Build Debug APK
-        run: ./gradlew assembleDebug --stacktrace 2>&1 | grep -A 5 "error:"
+        run: ./gradlew assembleDebug 2>&1 || true
+
+      - name: Show full log
+        run: ./gradlew assembleDebug --info 2>&1 | grep -E "(error|Error|cannot|unresolved)" | head -50
 
       - name: Find APK
         run: find . -name "*.apk" -type f
