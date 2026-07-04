@@ -6,6 +6,10 @@
     <uses-permission android:name="android.permission.health.READ_OXYGEN_SATURATION"/>
     <uses-permission android:name="android.permission.health.READ_STEPS"/>
 
+    <queries>
+        <package android:name="com.google.android.apps.health.data" />
+    </queries>
+
     <application
         android:allowBackup="true"
         android:label="Vitals Sync"
@@ -20,7 +24,6 @@
             </intent-filter>
         </activity>
 
-        <!-- Required for Health Connect permissions -->
         <activity-alias
             android:name="ViewPermissionUsageActivity"
             android:exported="true"
