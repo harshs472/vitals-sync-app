@@ -3,7 +3,6 @@ package com.igentico.vitalssync
 import android.os.Bundle
 import android.widget.Button
 import android.widget.TextView
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.PermissionController
@@ -60,26 +59,41 @@ class MainActivity : AppCompatActivity() {
         tvSpO2   = findViewById(R.id.tvSpO2)
         tvSteps  = findViewById(R.id.tvSteps)
 
+        // Debug: show all status codes on screen
         val status1 = HealthConnectClient.getSdkStatus(this, "com.google.android.apps.health.data")
         val status2 = HealthConnectClient.getSdkStatus(this, "com.google.android.apps.healthdata")
-        val status3 = HealthConnectClient.getSdkStatus(this) // default
-
+        val status3 = HealthConnectClient.getSdkStatus(this)
         setStatus("s1=$status1 s2=$status2 s3=$status3")
-        if (availability != HealthConnectClient.SDK_AVAILABLE) {
-            setStatus("❌ Health Connect not available on this device.")
-            btnSync.isEnabled = false
-            return
+
+        // Find which package works (2 = SDK_AVAILABLE)
+        val providerPackage = when {
+            status1 == HealthConnectClient.SDK_AVAILABLE -> "com.google.android.apps.health.data"
+            status2 == HealthConnectClient.SDK_AVAILABLE -> "com.google.android.apps.healthdata"
+            status3 == HealthConnectClient.SDK_AVAILABLE -> null
+            else -> {
+                setStatus("❌ HC not available. s1=$status1 s2=$status2 s3=$status3")
+                btnSync.isEnabled = false
+                return
+            }
         }
 
-        healthConnectClient = HealthConnectClient.getOrCreate(this)
+        healthConnectClient = if (providerPackage != null)
+            HealthConnectClient.getOrCreate(this, providerPackage)
+        else
+            HealthConnectClient.getOrCreate(this)
+
         btnSync.setOnClickListener { syncVitals() }
 
         CoroutineScope(Dispatchers.Main).launch {
-            val granted = healthConnectClient.permissionController.getGrantedPermissions()
-            if (!granted.containsAll(PERMISSIONS)) {
-                requestPermissions.launch(PERMISSIONS)
-            } else {
-                setStatus("Ready. Tap to sync.")
+            try {
+                val granted = healthConnectClient.permissionController.getGrantedPermissions()
+                if (!granted.containsAll(PERMISSIONS)) {
+                    requestPermissions.launch(PERMISSIONS)
+                } else {
+                    setStatus("Ready. Tap to sync.")
+                }
+            } catch (e: Exception) {
+                setStatus("❌ Permission check failed: ${e.message}")
             }
         }
     }
@@ -94,26 +108,22 @@ class MainActivity : AppCompatActivity() {
                 val since = now.minus(24, ChronoUnit.HOURS)
                 val timeRange = TimeRangeFilter.between(since, now)
 
-                // Heart Rate
                 val hrRecords = healthConnectClient.readRecords(
                     ReadRecordsRequest(HeartRateRecord::class, timeRange)
                 ).records
                 val latestHR = hrRecords.flatMap { it.samples }
                     .maxByOrNull { it.time }?.beatsPerMinute
 
-                // SpO2
                 val spo2Records = healthConnectClient.readRecords(
                     ReadRecordsRequest(OxygenSaturationRecord::class, timeRange)
                 ).records
                 val latestSpO2 = spo2Records.maxByOrNull { it.time }?.percentage?.value
 
-                // Steps
                 val stepsResult = healthConnectClient.aggregate(
                     AggregateRequest(setOf(StepsRecord.COUNT_TOTAL), timeRange)
                 )
                 val totalSteps = stepsResult[StepsRecord.COUNT_TOTAL]
 
-                // Build payload
                 val payload = JSONObject().apply {
                     put("heart_rate", JSONArray().apply {
                         if (latestHR != null) put(JSONObject().put("bpm", latestHR))
@@ -126,7 +136,6 @@ class MainActivity : AppCompatActivity() {
                     })
                 }
 
-                // POST
                 val conn = URL(WEBHOOK_URL).openConnection() as HttpURLConnection
                 conn.requestMethod = "POST"
                 conn.setRequestProperty("Content-Type", "application/json")
