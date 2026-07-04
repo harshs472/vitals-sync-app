@@ -67,20 +67,21 @@ class MainActivity : AppCompatActivity() {
 
         // Find which package works (2 = SDK_AVAILABLE)
         val providerPackage = when {
-            status1 == HealthConnectClient.SDK_AVAILABLE -> "com.google.android.apps.health.data"
-            status2 == HealthConnectClient.SDK_AVAILABLE -> "com.google.android.apps.healthdata"
-            status3 == HealthConnectClient.SDK_AVAILABLE -> null
+            status1 != 0 -> "com.google.android.apps.health.data"
+            status2 != 0 -> "com.google.android.apps.healthdata"
+            status3 != 0 -> null
             else -> {
-                setStatus("❌ HC not available. s1=$status1 s2=$status2 s3=$status3")
                 btnSync.isEnabled = false
                 return
             }
         }
-
+        
         healthConnectClient = if (providerPackage != null)
             HealthConnectClient.getOrCreate(this, providerPackage)
         else
             HealthConnectClient.getOrCreate(this)
+        
+        setStatus("HC found. Checking permissions...")
 
         btnSync.setOnClickListener { syncVitals() }
 
