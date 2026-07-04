@@ -60,7 +60,7 @@ class MainActivity : AppCompatActivity() {
         tvSpO2   = findViewById(R.id.tvSpO2)
         tvSteps  = findViewById(R.id.tvSteps)
 
-        val availability = HealthConnectClient.getSdkStatus(this)
+        val availability = HealthConnectClient.getSdkStatus(this, "com.google.android.apps.healthdata")
         if (availability != HealthConnectClient.SDK_AVAILABLE) {
             setStatus("❌ Health Connect not available on this device.")
             btnSync.isEnabled = false
