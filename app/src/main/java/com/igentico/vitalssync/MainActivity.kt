@@ -6,11 +6,13 @@ import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.health.connect.client.HealthConnectClient
+import androidx.health.connect.client.PermissionController
+import androidx.health.connect.client.permission.HealthPermission
 import androidx.health.connect.client.records.HeartRateRecord
 import androidx.health.connect.client.records.OxygenSaturationRecord
 import androidx.health.connect.client.records.StepsRecord
-import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.request.AggregateRequest
+import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
 import kotlinx.coroutines.*
 import org.json.JSONArray
@@ -31,23 +33,22 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvSteps: TextView
     private lateinit var healthConnectClient: HealthConnectClient
 
-    private val permissionLauncher = registerForActivityResult(
-        androidx.health.connect.client.permission.HealthPermission.createRequestPermissionResultContract()
-    ) { granted ->
-        if (granted.containsAll(PERMISSIONS)) {
-            setStatus("Permissions granted. Tap sync.")
-        } else {
-            setStatus("❌ Permissions denied. Please grant in Health Connect.")
-        }
-    }
-
     companion object {
         val PERMISSIONS = setOf(
-            androidx.health.connect.client.permission.HealthPermission.getReadPermission(HeartRateRecord::class),
-            androidx.health.connect.client.permission.HealthPermission.getReadPermission(OxygenSaturationRecord::class),
-            androidx.health.connect.client.permission.HealthPermission.getReadPermission(StepsRecord::class),
+            HealthPermission.getReadPermission(HeartRateRecord::class),
+            HealthPermission.getReadPermission(OxygenSaturationRecord::class),
+            HealthPermission.getReadPermission(StepsRecord::class),
         )
     }
+
+    private val requestPermissions =
+        registerForActivityResult(PermissionController.createRequestPermissionResultContract()) { granted ->
+            if (granted.containsAll(PERMISSIONS)) {
+                setStatus("✅ Permissions granted. Tap sync.")
+            } else {
+                setStatus("❌ Permissions denied. Grant in Health Connect settings.")
+            }
+        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -67,14 +68,12 @@ class MainActivity : AppCompatActivity() {
         }
 
         healthConnectClient = HealthConnectClient.getOrCreate(this)
-
         btnSync.setOnClickListener { syncVitals() }
 
-        // Check permissions on launch
         CoroutineScope(Dispatchers.Main).launch {
             val granted = healthConnectClient.permissionController.getGrantedPermissions()
             if (!granted.containsAll(PERMISSIONS)) {
-                permissionLauncher.launch(PERMISSIONS)
+                requestPermissions.launch(PERMISSIONS)
             } else {
                 setStatus("Ready. Tap to sync.")
             }
@@ -91,56 +90,40 @@ class MainActivity : AppCompatActivity() {
                 val since = now.minus(24, ChronoUnit.HOURS)
                 val timeRange = TimeRangeFilter.between(since, now)
 
-                // Read Heart Rate
-                val hrResponse = healthConnectClient.readRecords(
+                // Heart Rate
+                val hrRecords = healthConnectClient.readRecords(
                     ReadRecordsRequest(HeartRateRecord::class, timeRange)
-                )
-                val latestHR = hrResponse.records
-                    .flatMap { it.samples }
-                    .maxByOrNull { it.time }
-                    ?.beatsPerMinute
+                ).records
+                val latestHR = hrRecords.flatMap { it.samples }
+                    .maxByOrNull { it.time }?.beatsPerMinute
 
-                // Read SpO2
-                val spo2Response = healthConnectClient.readRecords(
+                // SpO2
+                val spo2Records = healthConnectClient.readRecords(
                     ReadRecordsRequest(OxygenSaturationRecord::class, timeRange)
-                )
-                val latestSpO2 = spo2Response.records
-                    .maxByOrNull { it.time }
-                    ?.percentage?.value
+                ).records
+                val latestSpO2 = spo2Records.maxByOrNull { it.time }?.percentage?.value
 
-                // Read Steps (today total)
-                val stepsResponse = healthConnectClient.aggregate(
-                    AggregateRequest(
-                        metrics = setOf(StepsRecord.COUNT_TOTAL),
-                        timeRangeFilter = timeRange
-                    )
+                // Steps
+                val stepsResult = healthConnectClient.aggregate(
+                    AggregateRequest(setOf(StepsRecord.COUNT_TOTAL), timeRange)
                 )
-                val totalSteps = stepsResponse[StepsRecord.COUNT_TOTAL]
+                val totalSteps = stepsResult[StepsRecord.COUNT_TOTAL]
 
-                // Build JSON payload
+                // Build payload
                 val payload = JSONObject().apply {
-                    val hrArray = JSONArray()
-                    if (latestHR != null) {
-                        hrArray.put(JSONObject().put("bpm", latestHR))
-                    }
-                    put("heart_rate", hrArray)
-
-                    val spo2Array = JSONArray()
-                    if (latestSpO2 != null) {
-                        spo2Array.put(JSONObject().put("percentage", latestSpO2))
-                    }
-                    put("oxygen_saturation", spo2Array)
-
-                    val stepsArray = JSONArray()
-                    if (totalSteps != null) {
-                        stepsArray.put(JSONObject().put("count", totalSteps))
-                    }
-                    put("steps", stepsArray)
+                    put("heart_rate", JSONArray().apply {
+                        if (latestHR != null) put(JSONObject().put("bpm", latestHR))
+                    })
+                    put("oxygen_saturation", JSONArray().apply {
+                        if (latestSpO2 != null) put(JSONObject().put("percentage", latestSpO2))
+                    })
+                    put("steps", JSONArray().apply {
+                        if (totalSteps != null) put(JSONObject().put("count", totalSteps))
+                    })
                 }
 
-                // POST to backend
-                val url = URL(WEBHOOK_URL)
-                val conn = url.openConnection() as HttpURLConnection
+                // POST
+                val conn = URL(WEBHOOK_URL).openConnection() as HttpURLConnection
                 conn.requestMethod = "POST"
                 conn.setRequestProperty("Content-Type", "application/json")
                 conn.doOutput = true
@@ -154,12 +137,7 @@ class MainActivity : AppCompatActivity() {
                     tvHR.text    = if (latestHR != null) "$latestHR bpm" else "--"
                     tvSpO2.text  = if (latestSpO2 != null) "${"%.1f".format(latestSpO2)}%" else "--"
                     tvSteps.text = totalSteps?.toString() ?: "--"
-
-                    if (responseCode == 200) {
-                        setStatus("✅ Synced to dashboard!")
-                    } else {
-                        setStatus("⚠️ Server returned $responseCode")
-                    }
+                    setStatus(if (responseCode == 200) "✅ Synced to dashboard!" else "⚠️ Server error $responseCode")
                     btnSync.isEnabled = true
                 }
 
@@ -173,6 +151,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setStatus(msg: String) {
-        tvStatus.text = msg
+        runOnUiThread { tvStatus.text = msg }
     }
 }
